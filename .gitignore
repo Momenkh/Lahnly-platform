@@ -1,0 +1,13 @@
+.claude/
+
+**/*.mp3
+**/*.wav
+**/*.m4a
+**/*.flac
+**/*.aac
+**/*.ogg
+
+pipeline/
+__pycache__/
+*.pyc
+.env
