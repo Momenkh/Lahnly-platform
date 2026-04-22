@@ -38,12 +38,17 @@ import numpy as np
 _FLATNESS_DISTORTED   = 0.07   # above this → distorted
 _FLATNESS_DISTORTED_H = 0.14   # above this → high-confidence distorted
 
-# Spectral contrast (mean dB, 4 bands) threshold separating acoustic from clean.
-# Acoustic guitars have stronger harmonic peaks relative to valleys than clean electric.
-_CONTRAST_ACOUSTIC = 26.0
+# Spectral contrast (mean dB, 4 bands).
+# After Demucs separation, acoustic guitars show HIGH contrast (30+) due to
+# clear harmonic structure; clean electrics tend to fall in the 24–28 range.
+# Require a higher bar to avoid false acoustic positives on clean electric.
+_CONTRAST_ACOUSTIC = 29.0
 
-# Spectral centroid (Hz) — acoustic tends to be brighter due to body resonance.
-_CENTROID_ACOUSTIC = 2600.0
+# Spectral centroid (Hz) — on separated stems, acoustic body resonance keeps
+# the centroid LOW (600–900 Hz); clean electric lead sits higher (1500–2500 Hz).
+# Flag as acoustic when centroid is below this value (NOT above — opposite of
+# the initial assumption).
+_CENTROID_ACOUSTIC_MAX = 1200.0
 
 # Chroma polyphony threshold: median active chroma bins per active frame.
 # Rhythm chords typically activate 3+ pitch classes simultaneously.
@@ -93,21 +98,27 @@ def detect_guitar_mode(stem_path: str) -> dict:
         type_conf = 0.55 + 0.45 * min(1.0, (med_flatness - _FLATNESS_DISTORTED)
                                            / (_FLATNESS_DISTORTED_H - _FLATNESS_DISTORTED))
     else:
-        # Not distorted — distinguish acoustic vs clean
-        # Acoustic has higher spectral contrast (clear harmonic structure) and/or
-        # brighter centroid (string + body resonance).
+        # Not distorted — distinguish acoustic vs clean.
+        # On Demucs-separated stems, acoustic shows high contrast (clear harmonics
+        # from string + body resonance) AND low centroid (body-resonant low-mids).
+        # Clean electric sits in intermediate contrast with a higher centroid.
         acoustic_votes = 0
         if mean_contrast >= _CONTRAST_ACOUSTIC:
             acoustic_votes += 1
-        if mean_centroid >= _CENTROID_ACOUSTIC:
+        if mean_centroid <= _CENTROID_ACOUSTIC_MAX:
             acoustic_votes += 1
 
-        if acoustic_votes >= 1:
+        if acoustic_votes >= 2:
+            # Both signals agree → confident acoustic
             guitar_type = "acoustic"
-            type_conf   = 0.60 + 0.10 * acoustic_votes   # 0.70 or 0.80
+            type_conf   = 0.80
+        elif acoustic_votes == 1 and mean_contrast >= _CONTRAST_ACOUSTIC:
+            # Strong contrast alone is sufficient (high contrast + body-like harmonics)
+            guitar_type = "acoustic"
+            type_conf   = 0.65
         else:
             guitar_type = "clean"
-            type_conf   = 0.65
+            type_conf   = 0.70
 
     # ── Role features ─────────────────────────────────────────────────────────
 

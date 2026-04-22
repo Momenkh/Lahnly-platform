@@ -1,23 +1,22 @@
 """
 Batch accuracy benchmark — auto-discovers all audio files in the current directory,
-infers guitar type+role from the filename, runs the pipeline, and appends scores to
-benchmark_results.json.
+infers guitar role from the filename, lets the pipeline auto-detect the type from
+the separated stem, and appends scores to benchmark_results.json.
 
-Type+role inference rules (case-insensitive filename match):
-  contains "acoustic"/"accoustic"  → type=acoustic
-  contains "distorted"/"dist"      → type=distorted
-  otherwise                        → type=clean
-  contains "lead"/"solo"           → role=lead
-  contains "rhythm"                → role=rhythm
-  no role match (full/mixed song)  → TWO runs: role=rhythm + role=lead
+Role inference rules (case-insensitive filename match):
+  contains "lead"/"solo"  → role=lead   (single run)
+  contains "rhythm"       → role=rhythm (single run)
+  no match (full song)    → TWO runs: role=rhythm + role=lead
+
+Guitar type is always auto-detected by the pipeline from the stem — the batch
+script never passes --type so the detector runs on every song.
 
 Usage:
-  python batch_score.py                        # run all discovered songs
-  python batch_score.py --type lead            # run only lead-role songs
-  python batch_score.py --type rhythm          # run only rhythm-role songs
-  python batch_score.py --type acoustic        # run only acoustic-type songs
-  python batch_score.py --from-stage 2        # skip separation (reuse existing stems)
-  python batch_score.py --no-save             # print results only, don't write to JSON
+  python batch_score.py                    # run all discovered songs
+  python batch_score.py --role lead        # run only lead-role songs
+  python batch_score.py --role rhythm      # run only rhythm-role songs
+  python batch_score.py --from-stage 2    # skip separation (reuse existing stems)
+  python batch_score.py --no-save         # print results only, don't write to JSON
 """
 
 import argparse
@@ -35,37 +34,25 @@ if hasattr(sys.stdout, "reconfigure"):
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
 RESULTS_FILE     = "benchmark_results.json"
 SCORE_RE         = re.compile(r"\[Score\] Chroma similarity \(stem vs preview\): ([0-9.]+)")
+MODE_RE          = re.compile(r"Mode\s*:\s*(\w+)_(\w+)")
 
 
-def infer_type_and_role(filename: str) -> list[tuple[str, str]]:
+def infer_roles(filename: str) -> list[str]:
     """
-    Returns list of (guitar_type, guitar_role) pairs to run for this file.
-    Labelled files → single pair.
-    Unlabelled (mixed/full song) → two runs: rhythm + lead (both clean type).
+    Returns the guitar role(s) to run for this file.
+    Type is always auto-detected by the pipeline from the stem.
+    Labelled files → single role.  Unlabelled → ["rhythm", "lead"] (two runs).
     """
     name = filename.lower()
-
-    if any(k in name for k in ("acoustic", "accoustic")):
-        guitar_type = "acoustic"
-    elif any(k in name for k in ("distorted", "dist")):
-        guitar_type = "distorted"
-    else:
-        guitar_type = "clean"
-
     if any(k in name for k in ("lead", "solo")):
-        return [(guitar_type, "lead")]
+        return ["lead"]
     if "rhythm" in name:
-        return [(guitar_type, "rhythm")]
-    # No role label → run twice
-    return [(guitar_type, "rhythm"), (guitar_type, "lead")]
+        return ["rhythm"]
+    return ["rhythm", "lead"]
 
 
-def discover_songs(type_filter: str | None = None) -> list[tuple[str, str, str]]:
-    """Returns list of (filename, guitar_type, guitar_role) triples to run.
-
-    type_filter may be a guitar type ("acoustic", "clean", "distorted") or
-    a role ("lead", "rhythm") — matched against either field.
-    """
+def discover_songs(role_filter: str | None = None) -> list[tuple[str, str]]:
+    """Returns list of (filename, guitar_role) pairs to run."""
     songs = []
     seen = set()
     for ext in AUDIO_EXTENSIONS:
@@ -73,9 +60,9 @@ def discover_songs(type_filter: str | None = None) -> list[tuple[str, str, str]]
             if f in seen:
                 continue
             seen.add(f)
-            for gtype, grole in infer_type_and_role(f):
-                if type_filter is None or type_filter in (gtype, grole):
-                    songs.append((f, gtype, grole))
+            for role in infer_roles(f):
+                if role_filter is None or role == role_filter:
+                    songs.append((f, role))
     return sorted(songs)
 
 
@@ -97,10 +84,12 @@ def save_results(data: dict) -> None:
         json.dump(data, fh, indent=2, ensure_ascii=False)
 
 
-def run_song(filename: str, guitar_type: str, guitar_role: str, extra_args: list[str]) -> float | None:
+def run_song(filename: str, guitar_role: str, extra_args: list[str]) -> tuple[float | None, str | None, str | None]:
+    """Run the pipeline for one song+role. Type is auto-detected by the pipeline.
+    Returns (score, detected_guitar_type, detected_guitar_role) — all None on error.
+    """
     cmd = [
         sys.executable, "main.py", filename,
-        "--type", guitar_type,
         "--role", guitar_role,
         "--score", "--no-play", "--no-viz",
     ] + extra_args
@@ -108,13 +97,19 @@ def run_song(filename: str, guitar_type: str, guitar_role: str, extra_args: list
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     output = proc.stdout + proc.stderr
 
-    keywords = ["[Stage", "[Score", "[Warning", "Error", "Traceback"]
+    keywords = ["[Auto]", "Mode :", "[Stage", "[Score", "[Warning", "Error", "Traceback"]
     for line in output.splitlines():
         if any(k in line for k in keywords):
             print("  " + line)
 
-    m = SCORE_RE.search(output)
-    return float(m.group(1)) if m else None
+    score_m = SCORE_RE.search(output)
+    mode_m  = MODE_RE.search(output)
+
+    score         = float(score_m.group(1)) if score_m else None
+    detected_type = mode_m.group(1) if mode_m else None
+    detected_role = mode_m.group(2) if mode_m else None
+
+    return score, detected_type, detected_role
 
 
 def print_summary(runs: list[dict]) -> None:
@@ -145,8 +140,8 @@ def print_summary(runs: list[dict]) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Batch chroma-similarity benchmark")
     parser.add_argument(
-        "--type", choices=["acoustic", "clean", "distorted", "lead", "rhythm"], default=None,
-        help="Filter: only run songs matching this type (acoustic/clean/distorted) or role (lead/rhythm)",
+        "--role", choices=["lead", "rhythm"], default=None,
+        help="Only run songs of this role (lead or rhythm). Default: all roles.",
     )
     parser.add_argument(
         "--from-stage", type=int, default=1, metavar="N",
@@ -158,7 +153,7 @@ def main():
     )
     args = parser.parse_args()
 
-    songs = discover_songs(type_filter=args.type)
+    songs = discover_songs(role_filter=args.role)
     if not songs:
         print("No matching audio files found.")
         return
@@ -169,22 +164,24 @@ def main():
     new_runs: list[dict] = []
 
     print("=" * 80)
-    label = f"filter={args.type}" if args.type else "all"
-    print(f"  Discovered {len(songs)} run(s) — {label}")
+    label = f"role={args.role}" if args.role else "all roles"
+    print(f"  Discovered {len(songs)} run(s) — {label}  (type: auto-detected)")
     print("=" * 80)
 
-    for filename, guitar_type, guitar_role in songs:
-        mode = f"{guitar_type}_{guitar_role}"
-        ts   = datetime.now().strftime("%Y-%m-%d %H:%M")
-        print(f"\n[{mode}] {filename}", flush=True)
-        score = run_song(filename, guitar_type, guitar_role, extra_args)
+    for filename, guitar_role in songs:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        print(f"\n[role={guitar_role}] {filename}", flush=True)
+        score, detected_type, detected_role = run_song(filename, guitar_role, extra_args)
 
         if score is not None:
-            print(f"  → Score: {score:.3f}")
+            guitar_type = detected_type or "unknown"
+            actual_role = detected_role or guitar_role
+            mode        = f"{guitar_type}_{actual_role}"
+            print(f"  -> Score: {score:.3f}  (detected: {mode})")
             entry = {
                 "song":        filename,
                 "guitar_type": guitar_type,
-                "guitar_role": guitar_role,
+                "guitar_role": actual_role,
                 "mode":        mode,
                 "score":       score,
                 "timestamp":   ts,
@@ -194,7 +191,7 @@ def main():
                 results_data["runs"].append(entry)
                 save_results(results_data)
         else:
-            print("  → ERROR: no score extracted")
+            print("  -> ERROR: no score extracted")
 
     print_summary(new_runs if new_runs else results_data.get("runs", []))
 

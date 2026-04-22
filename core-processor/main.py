@@ -181,13 +181,13 @@ def main():
                 args.guitar_type = detected["guitar_type"]
                 conf = detected["type_confidence"]
                 flag = "" if conf >= 0.70 else "  [low confidence — use --type to override]"
-                print(f"[Auto] Type  → {args.guitar_type:<10} ({conf:.0%} confidence){flag}")
+                print(f"[Auto] Type  : {args.guitar_type:<10} ({conf:.0%} confidence){flag}")
 
             if args.guitar_role is None:
                 args.guitar_role = detected["guitar_role"]
                 conf = detected["role_confidence"]
                 flag = "" if conf >= 0.70 else "  [low confidence — use --role to override]"
-                print(f"[Auto] Role  → {args.guitar_role:<10} ({conf:.0%} confidence){flag}")
+                print(f"[Auto] Role  : {args.guitar_role:<10} ({conf:.0%} confidence){flag}")
         else:
             # No audio source for detection — try saved clean meta, then defaults
             if args.from_stage >= 3:
@@ -205,6 +205,23 @@ def main():
                     args.guitar_role = "rhythm"
                 print(f"[Auto] No audio source for detection — defaulting to "
                       f"type={args.guitar_type} role={args.guitar_role}")
+
+    # ── Mode summary ─────────────────────────────────────────────────────────
+    _TYPE_DESC = {
+        "acoustic":  "acoustic guitar (nylon/steel string)",
+        "clean":     "clean electric guitar",
+        "distorted": "distorted electric guitar",
+    }
+    _ROLE_DESC = {
+        "lead":   "lead / solo (single-note, melody isolation on)",
+        "rhythm": "rhythm / chords (full polyphony, all notes used)",
+    }
+    sep = "-" * 60
+    print(f"\n{sep}")
+    print(f"  Mode : {args.guitar_type}_{args.guitar_role}")
+    print(f"  Type : {_TYPE_DESC.get(args.guitar_type, args.guitar_type)}")
+    print(f"  Role : {_ROLE_DESC.get(args.guitar_role, args.guitar_role)}")
+    print(f"{sep}\n")
 
     # ── Stage 2: Pitch Extraction ─────────────────────────────────────────────
     if args.from_stage <= 2:
