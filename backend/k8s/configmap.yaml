@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lahnly-config
+  namespace: lahnly
+data:
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  S3_BUCKET: "lahnly"
+  S3_REGION: "us-east-1"
+  S3_ENDPOINT: "http://minio-service:9000"
+  CORE_PROCESSOR_PATH: "/app/core-processor"
+  PYTHON_BIN: "python3"
+  NODE_ENV: "production"
+  PORT: "3000"

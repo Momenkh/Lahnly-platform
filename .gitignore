@@ -1,5 +1,6 @@
 .claude/
 
+# Audio files
 **/*.mp3
 **/*.wav
 **/*.m4a
@@ -7,9 +8,17 @@
 **/*.aac
 **/*.ogg
 
+# Core processor
 outputs/
 benchmark_results.json
 __pycache__/
 *.pyc
+*.pyo
 .env
-backend/
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/generated/
+backend/k8s/secret.yaml

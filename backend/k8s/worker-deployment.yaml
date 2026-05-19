@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lahnly-worker
+  namespace: lahnly
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lahnly-worker
+  template:
+    metadata:
+      labels:
+        app: lahnly-worker
+    spec:
+      containers:
+        - name: worker
+          image: lahnly/backend-worker:latest
+          envFrom:
+            - configMapRef:
+                name: lahnly-config
+            - secretRef:
+                name: lahnly-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"

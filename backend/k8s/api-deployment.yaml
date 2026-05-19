@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lahnly-api
+  namespace: lahnly
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: lahnly-api
+  template:
+    metadata:
+      labels:
+        app: lahnly-api
+    spec:
+      containers:
+        - name: api
+          image: lahnly/backend-api:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: lahnly-config
+            - secretRef:
+                name: lahnly-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lahnly-api-service
+  namespace: lahnly
+spec:
+  selector:
+    app: lahnly-api
+  ports:
+    - port: 80
+      targetPort: 3000

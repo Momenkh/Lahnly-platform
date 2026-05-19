@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+/generated/prisma
+
+# Never commit real secrets
+k8s/secret.yaml
